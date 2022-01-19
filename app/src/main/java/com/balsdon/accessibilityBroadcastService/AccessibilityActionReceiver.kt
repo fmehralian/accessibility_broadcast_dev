@@ -5,10 +5,13 @@ import android.content.Context
 import android.content.Intent
 import com.balsdon.accessibilityDeveloperService.AccessibilityDeveloperService.Companion.DIRECTION_BACK
 import com.balsdon.accessibilityDeveloperService.AccessibilityDeveloperService.Companion.DIRECTION_FORWARD
+import java.io.File
+import java.io.FileWriter
 
 class AccessibilityActionReceiver : BroadcastReceiver() {
     companion object {
         const val ACCESSIBILITY_ACTION = "ACTION"
+        const val BROADCAST_ID = "BROADCAST_ID"
 
         const val ACTION_SWIPE_LEFT = "ACTION_SWIPE_LEFT"
         const val ACTION_SWIPE_RIGHT = "ACTION_SWIPE_RIGHT"
@@ -37,6 +40,8 @@ class AccessibilityActionReceiver : BroadcastReceiver() {
         const val PARAMETER_HEADING = "PARAMETER_HEADING"
         const val PARAMETER_DIRECTION = "PARAMETER_DIRECTION"
         const val PARAMETER_TYPE = "PARAMETER_TYPE"
+
+        const val ACTION_DUMP_A11Y_TREE = "ACTION_DUMP_A11Y_TREE"
     }
 
     private fun showError(context: Context, message: String) {
@@ -49,17 +54,19 @@ class AccessibilityActionReceiver : BroadcastReceiver() {
         require(intent != null) { "Intent is required" }
         require(AccessibilityDeveloperService.instance != null) { "Service is required" }
         val serviceReference = AccessibilityDeveloperService.instance!!
-
+        val broadcastID = intent.getStringExtra(BROADCAST_ID)
+        log("AccessibilityActionReceiver", " ~~> broadcastID: [$broadcastID]")
+        require(broadcastID != null) { "Broadcast ID is required"}
         intent.getStringExtra(ACCESSIBILITY_ACTION)?.let {
             log("AccessibilityActionReceiver", "  ~~> ACTION: [$it]")
             serviceReference.apply {
                 when (it) {
                     ACTION_DEBUG -> debugAction()
-
-                    ACTION_SWIPE_LEFT -> swipeHorizontal(true)
-                    ACTION_SWIPE_RIGHT -> swipeHorizontal(false)
-                    ACTION_SWIPE_UP -> swipeVertical(true)
-                    ACTION_SWIPE_DOWN -> swipeVertical(false)
+                    ACTION_DUMP_A11Y_TREE -> dumpA11yTree(broadcastID = broadcastID)
+                    ACTION_SWIPE_LEFT -> swipeHorizontal(true, broadcastID)
+                    ACTION_SWIPE_RIGHT -> swipeHorizontal(false, broadcastID)
+                    ACTION_SWIPE_UP -> swipeVertical(true, broadcastID)
+                    ACTION_SWIPE_DOWN -> swipeVertical(false, broadcastID)
                     ACTION_CLICK -> click()
                     ACTION_LONG_CLICK -> click(true)
                     ACTION_CURTAIN -> toggleCurtain()
@@ -157,6 +164,6 @@ class AccessibilityActionReceiver : BroadcastReceiver() {
                     }
                 }
             }
-        } ?: serviceReference.swipeHorizontal(true)
+        } ?: serviceReference.swipeHorizontal(true, broadcastID)
     }
 }

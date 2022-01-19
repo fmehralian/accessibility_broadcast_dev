@@ -10,6 +10,7 @@ import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.AppCompatImageButton
 import kotlinx.coroutines.*
+import java.io.File
 import java.math.BigDecimal
 import java.math.RoundingMode
 
@@ -20,8 +21,17 @@ fun Context.showToast(message: String) {
         .show()
 }
 
-fun log(label: String, message: String) {
-    android.util.Log.d(label, "[$label]: $message")
+fun log(label: String, message: String, ack: Boolean = false) {
+    android.util.Log.d(label, "$message")
+    if (ack) {
+        var code = message.split(" ").last()
+        var fileName = "$label-$code"
+        AccessibilityDeveloperService.instance?.baseContext?.filesDir?.let {
+            val file = File(it.path, fileName)
+            file.createNewFile()
+            android.util.Log.d(label, it.path)
+        } ?: android.util.Log.d(label, "ERROR in creating new file")
+    }
 }
 
 class DemoActivity : AppCompatActivity() {
@@ -29,7 +39,21 @@ class DemoActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         setSupportActionBar(findViewById(R.id.toolbar))
-
+//        val permission =
+//            ActivityCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE)
+//        val REQUEST_EXTERNAL_STORAGE = 1
+//        val PERMISSIONS_STORAGE = arrayOf(
+//            Manifest.permission.READ_EXTERNAL_STORAGE,
+//            Manifest.permission.WRITE_EXTERNAL_STORAGE
+//        )
+//        if (permission != PackageManager.PERMISSION_GRANTED) {
+//            // We don't have permission so prompt the user
+//            ActivityCompat.requestPermissions(
+//                this,
+//                PERMISSIONS_STORAGE,
+//                REQUEST_EXTERNAL_STORAGE
+//            )
+//        }
         setUpButtons()
     }
 

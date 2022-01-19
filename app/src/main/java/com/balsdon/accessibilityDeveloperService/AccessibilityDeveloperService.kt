@@ -9,8 +9,13 @@ import android.content.IntentFilter
 import android.content.res.Resources
 import android.graphics.Path
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.media.AudioManager
+import android.os.Build
+import android.os.Environment
+import android.os.SystemClock
 import android.util.DisplayMetrics
+import android.util.Xml
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
@@ -25,6 +30,8 @@ import android.widget.FrameLayout
 import android.widget.TextView
 import androidx.annotation.IdRes
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
+import org.xmlpull.v1.XmlSerializer
+import java.io.*
 
 
 /*
@@ -275,6 +282,128 @@ class AccessibilityDeveloperService : AccessibilityService() {
         findFocusedViewInfo().performAction(if (long) ACTION_LONG_CLICK else ACTION_CLICK)
     }
 
+    fun commonDocumentDirPath(FolderName: String): File? {
+        var dir: File? = null
+        dir = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            File(
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+                    .toString() + "/" + FolderName
+            )
+        } else {
+            File(Environment.getExternalStorageDirectory().toString() + "/" + FolderName)
+        }
+
+        // Make sure the path directory exists.
+        if (!dir.exists()) {
+            // Make it, if it doesn't exit
+            val success = dir.mkdirs()
+            if (!success) {
+                dir = null
+            }
+        }
+        log("dump", Environment.getExternalStorageDirectory().toString())
+        return dir
+    }
+
+    fun dumpA11yTree(node: AccessibilityNodeInfo = rootInActiveWindow, broadcastID: String) {
+        var LOG_TAG = "DumpResultCallback"
+        log(LOG_TAG, "start to dump")
+        val startTime = SystemClock.uptimeMillis();
+
+        val outputStream: OutputStream = FileOutputStream(File("/sdcard/Download/a11y_dump.xml"))
+        val writer = OutputStreamWriter(outputStream)
+        val serializer: XmlSerializer = Xml.newSerializer()
+        val stringWriter = StringWriter()
+        serializer.setOutput(stringWriter)
+        serializer.startDocument("UTF-8", true)
+        serializer.startTag("", "hierarchy")
+        dumpNodeRec(node, serializer, 0)
+        serializer.endTag("", "hierarchy");
+        serializer.endDocument();
+        writer.write(stringWriter.toString());
+        writer.close();
+        log(broadcastID, "DUMP 200", true)
+        log(LOG_TAG, "dumped to /sdcard/Download/a11y_dump.xml")
+        val endTime = SystemClock.uptimeMillis();
+        log(LOG_TAG, "Fetch time: " + (endTime - startTime) + "ms")
+    }
+
+    @Throws(IOException::class)
+    private fun dumpNodeRec(node: AccessibilityNodeInfo, serializer: XmlSerializer, index: Int) {
+
+        serializer.startTag("", "node")
+
+        serializer.attribute("", "index", Integer.toString(index))
+        serializer.attribute("", "text", safeCharSeqToString(node.text))
+        serializer.attribute("", "class", safeCharSeqToString(node.className))
+        serializer.attribute("", "package", safeCharSeqToString(node.packageName))
+        serializer.attribute("", "content-desc", safeCharSeqToString(node.contentDescription))
+        serializer.attribute("", "checkable", java.lang.Boolean.toString(node.isCheckable))
+        serializer.attribute("", "checked", java.lang.Boolean.toString(node.isChecked))
+        serializer.attribute("", "clickable", java.lang.Boolean.toString(node.isClickable))
+        serializer.attribute("", "enabled", java.lang.Boolean.toString(node.isEnabled))
+        serializer.attribute("", "focusable", java.lang.Boolean.toString(node.isFocusable))
+        serializer.attribute("", "focused", java.lang.Boolean.toString(node.isFocused))
+        serializer.attribute("", "scrollable", java.lang.Boolean.toString(node.isScrollable))
+        serializer.attribute("", "long-clickable", java.lang.Boolean.toString(node.isLongClickable))
+        serializer.attribute("", "password", java.lang.Boolean.toString(node.isPassword))
+        serializer.attribute("", "selected", java.lang.Boolean.toString(node.isSelected))
+        serializer.attribute("", "visible", java.lang.Boolean.toString(node.isVisibleToUser))
+        val bounds = Rect()
+        node.getBoundsInScreen(bounds)
+        serializer.attribute("", "bounds", bounds.toShortString())
+        val count = node.childCount
+        for (i in 0 until count) {
+            val child = node.getChild(i)
+            if (child != null) {
+
+                dumpNodeRec(child, serializer, i)
+                child.recycle()
+            } else {
+                log(
+                    "dumpA11yTree", String.format(
+                        "Null child %d/%d, parent: %s",
+                        i, count, node.toString()
+                    )
+                )
+            }
+        }
+        serializer.endTag("", "node")
+    }
+
+    private fun safeCharSeqToString(cs: CharSequence?): String? {
+        return cs?.let { stripInvalidXMLChars(it) } ?: ""
+    }
+
+    private fun stripInvalidXMLChars(cs: CharSequence): String? {
+        val ret = StringBuffer()
+        var ch: Char
+        /* http://www.w3.org/TR/xml11/#charsets
+        [#x1-#x8], [#xB-#xC], [#xE-#x1F], [#x7F-#x84], [#x86-#x9F], [#xFDD0-#xFDDF],
+        [#x1FFFE-#x1FFFF], [#x2FFFE-#x2FFFF], [#x3FFFE-#x3FFFF],
+        [#x4FFFE-#x4FFFF], [#x5FFFE-#x5FFFF], [#x6FFFE-#x6FFFF],
+        [#x7FFFE-#x7FFFF], [#x8FFFE-#x8FFFF], [#x9FFFE-#x9FFFF],
+        [#xAFFFE-#xAFFFF], [#xBFFFE-#xBFFFF], [#xCFFFE-#xCFFFF],
+        [#xDFFFE-#xDFFFF], [#xEFFFE-#xEFFFF], [#xFFFFE-#xFFFFF],
+        [#x10FFFE-#x10FFFF].
+         */for (i in 0 until cs.length) {
+            ch = cs[i]
+            if (ch.toInt() >= 0x1 && ch.toInt() <= 0x8 || ch.toInt() >= 0xB && ch.toInt() <= 0xC || ch.toInt() >= 0xE && ch.toInt() <= 0x1F ||
+                ch.toInt() >= 0x7F && ch.toInt() <= 0x84 || ch.toInt() >= 0x86 && ch.toInt() <= 0x9f ||
+                ch.toInt() >= 0xFDD0 && ch.toInt() <= 0xFDDF || ch.toInt() >= 0x1FFFE && ch.toInt() <= 0x1FFFF ||
+                ch.toInt() >= 0x2FFFE && ch.toInt() <= 0x2FFFF || ch.toInt() >= 0x3FFFE && ch.toInt() <= 0x3FFFF ||
+                ch.toInt() >= 0x4FFFE && ch.toInt() <= 0x4FFFF || ch.toInt() >= 0x5FFFE && ch.toInt() <= 0x5FFFF ||
+                ch.toInt() >= 0x6FFFE && ch.toInt() <= 0x6FFFF || ch.toInt() >= 0x7FFFE && ch.toInt() <= 0x7FFFF ||
+                ch.toInt() >= 0x8FFFE && ch.toInt() <= 0x8FFFF || ch.toInt() >= 0x9FFFE && ch.toInt() <= 0x9FFFF ||
+                ch.toInt() >= 0xAFFFE && ch.toInt() <= 0xAFFFF || ch.toInt() >= 0xBFFFE && ch.toInt() <= 0xBFFFF ||
+                ch.toInt() >= 0xCFFFE && ch.toInt() <= 0xCFFFF || ch.toInt() >= 0xDFFFE && ch.toInt() <= 0xDFFFF ||
+                ch.toInt() >= 0xEFFFE && ch.toInt() <= 0xEFFFF || ch.toInt() >= 0xFFFFE && ch.toInt() <= 0xFFFFF ||
+                ch.toInt() >= 0x10FFFE && ch.toInt() <= 0x10FFFF
+            ) ret.append(".") else ret.append(ch)
+        }
+        return ret.toString()
+    }
+
     private fun createVerticalSwipePath(downToUp: Boolean): Path = Path().apply {
         if (downToUp) {
             moveTo(halfWidth - quarterWidth, halfHeight - quarterHeight)
@@ -295,20 +424,23 @@ class AccessibilityDeveloperService : AccessibilityService() {
         }
     }
 
-    fun swipeHorizontal(rightToLeft: Boolean) =
-        performGesture(GestureAction(createHorizontalSwipePath(rightToLeft)))
+    fun swipeHorizontal(rightToLeft: Boolean, broadcastId: String) =
+        performGesture(
+            GestureAction(createHorizontalSwipePath(rightToLeft)),
+            broadcastId = broadcastId
+        )
 
-    fun swipeVertical(downToUp: Boolean = true) =
-        performGesture(GestureAction(createVerticalSwipePath(downToUp)))
+    fun swipeVertical(downToUp: Boolean = true, broadcastId: String) =
+        performGesture(GestureAction(createVerticalSwipePath(downToUp)), broadcastId = broadcastId)
 
-    fun swipeUpThenDown() =
+    fun swipeUpThenDown(broadcastId: String) =
         performGesture(
             GestureAction(createVerticalSwipePath(true)),
-            GestureAction(createVerticalSwipePath(false), 500)
+            GestureAction(createVerticalSwipePath(false), 500), broadcastId = broadcastId
         )
 
 
-    fun threeFingerSwipeUp() {
+    fun threeFingerSwipeUp(broadcastId: String) {
         val stX = halfWidth - quarterWidth
         val stY = halfHeight + quarterHeight
         val enY = halfHeight - quarterHeight
@@ -327,12 +459,17 @@ class AccessibilityDeveloperService : AccessibilityService() {
             lineTo(stX + eighth, enY)
         }
 
-        performGesture(GestureAction(one), GestureAction(two), GestureAction(three))
+        performGesture(
+            GestureAction(one),
+            GestureAction(two),
+            GestureAction(three),
+            broadcastId = broadcastId
+        )
     }
 
     //https://developer.android.com/guide/topics/ui/accessibility/service#continued-gestures
     //TODO: BUG [01] Menu not appearing
-    fun swipeUpRight() {
+    fun swipeUpRight(broadcastId: String) {
         val stX = halfWidth - quarterWidth
         val enX = halfWidth + quarterWidth
 
@@ -356,7 +493,11 @@ class AccessibilityDeveloperService : AccessibilityService() {
         log("path_h", "mv x: [$enX], y: [$enY]")
         log("path_h", "dl x: [${enX - stX}], y: [${enY - enY}]")
 
-        performGesture(GestureAction(swipeUp), GestureAction(swipeLeftToRight, 500))
+        performGesture(
+            GestureAction(swipeUp),
+            GestureAction(swipeLeftToRight, 500),
+            broadcastId = broadcastId
+        )
     }
 
     // https://developer.android.com/guide/topics/ui/accessibility/service#continued-gestures
@@ -387,23 +528,46 @@ class AccessibilityDeveloperService : AccessibilityService() {
         }
     }
 
-    private fun performGesture(vararg gestureActions: GestureAction) =
+    private fun performGesture(vararg gestureActions: GestureAction, broadcastId: String) =
         dispatchGesture(
             createGestureFrom(*gestureActions),
-            GestureResultCallback(baseContext),
+            GestureResultCallback(baseContext, broadcastId, this.findFocus(FOCUS_ACCESSIBILITY)),
             null
         )
 
 
-    class GestureResultCallback(private val ctx: Context) :
+    class GestureResultCallback(
+        private val ctx: Context,
+        broadcastId: String,
+        preFocus: AccessibilityNodeInfo
+    ) :
         AccessibilityService.GestureResultCallback() {
+
+        private var gBroadcastId = broadcastId
+        private var gPreFocus = preFocus
         override fun onCompleted(gestureDescription: GestureDescription?) {
-            log("GestureResultCallback", "DONE SWIPE")
+            //  swiped and focus changed 200 and swiped but focus remain unchanged 204
+
+            var code: Int
+            var node = instance?.findFocus(FOCUS_ACCESSIBILITY)
+            code = if (node == null)
+                204
+            else {
+                var focus_bounds = Rect()
+                node.getBoundsInScreen(focus_bounds)
+                var pre_bounds = Rect()
+                gPreFocus.getBoundsInScreen(pre_bounds)
+                if (focus_bounds.equals(pre_bounds))
+                    204
+                else
+                    200
+            }
+            log(gBroadcastId, "SWIPE $code", true)
             super.onCompleted(gestureDescription)
         }
 
         override fun onCancelled(gestureDescription: GestureDescription?) {
-            log("GestureResultCallback", "DIDN'T SWIPE")
+            log("GestureResultCallback", "SWIPE 400")
             super.onCancelled(gestureDescription)
         }
     }
@@ -418,12 +582,14 @@ class AccessibilityDeveloperService : AccessibilityService() {
         )
     }
 
+    val log_tag = "AccessibilityDeveloperService"
+
     fun setVolume(percent: Int) {
         require(percent <= 100) { " percent must be an integer less than 100" }
         require(percent >= 0) { " percent must be an integer greater than 0" }
         val max = audioManager.getStreamMaxVolume(AudioManager.STREAM_ACCESSIBILITY)
         val volume = (max * (percent.toFloat() / 100f)).toInt()
-        log("AccessibilityDeveloperService", "  ~~> Volume set to value [$volume]")
+        log(log_tag, "  ~~> Volume set to value [$volume]")
         audioManager.setStreamVolume(
             AudioManager.STREAM_ACCESSIBILITY,
             volume,
@@ -433,7 +599,7 @@ class AccessibilityDeveloperService : AccessibilityService() {
 
     override fun onDestroy() {
         log(
-            "AccessibilityDeveloperService",
+            log_tag,
             "  ~~> onDestroy"
         )
         // Unregister accessibilityActionReceiver when destroyed.
@@ -444,12 +610,12 @@ class AccessibilityDeveloperService : AccessibilityService() {
                 accessibilityButtonCallback
             )
             log(
-                "AccessibilityDeveloperService",
+                log_tag,
                 "    ~~> Receiver is unregistered.\r\n    ~~> AccessibilityButtonCallback is unregistered."
             )
         } catch (e: Exception) {
             log(
-                "AccessibilityDeveloperService",
+                log_tag,
                 "    ~~> Unregister exception: [$e]"
             )
         } finally {
