@@ -309,8 +309,9 @@ class AccessibilityDeveloperService : AccessibilityService() {
         var LOG_TAG = "DumpResultCallback"
         log(LOG_TAG, "start to dump")
         val startTime = SystemClock.uptimeMillis();
+        val file = File(AccessibilityDeveloperService.instance?.baseContext?.filesDir?.path, "a11y3_$broadcastID.xml")
 
-        val outputStream: OutputStream = FileOutputStream(File("/sdcard/Download/a11y_dump.xml"))
+        val outputStream: OutputStream = FileOutputStream(file)
         val writer = OutputStreamWriter(outputStream)
         val serializer: XmlSerializer = Xml.newSerializer()
         val stringWriter = StringWriter()
@@ -323,7 +324,7 @@ class AccessibilityDeveloperService : AccessibilityService() {
         writer.write(stringWriter.toString());
         writer.close();
         log(broadcastID, "DUMP 200", true)
-        log(LOG_TAG, "dumped to /sdcard/Download/a11y_dump.xml")
+        log(LOG_TAG, "dumped to " + file.absolutePath)
         val endTime = SystemClock.uptimeMillis();
         log(LOG_TAG, "Fetch time: " + (endTime - startTime) + "ms")
     }
