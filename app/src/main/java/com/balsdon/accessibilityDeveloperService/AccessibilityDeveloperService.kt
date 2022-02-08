@@ -25,13 +25,12 @@ import android.view.accessibility.AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
 import android.view.accessibility.AccessibilityManager
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityNodeInfo.*
-import android.widget.CheckBox
-import android.widget.FrameLayout
-import android.widget.TextView
+import android.widget.*
 import androidx.annotation.IdRes
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
 import org.xmlpull.v1.XmlSerializer
 import java.io.*
+import java.lang.Thread.sleep
 
 
 /*
@@ -305,10 +304,11 @@ class AccessibilityDeveloperService : AccessibilityService() {
         return dir
     }
 
-    fun dumpA11yTree(node: AccessibilityNodeInfo = rootInActiveWindow, broadcastID: String) {
+
+    fun dumpA11yTree(broadcastID: String) {
         var LOG_TAG = "DumpResultCallback"
         log(LOG_TAG, "start to dump")
-        val startTime = SystemClock.uptimeMillis();
+        val startTime = SystemClock.uptimeMillis()
         val file = File(AccessibilityDeveloperService.instance?.baseContext?.filesDir?.path, "a11y3_$broadcastID.xml")
 
         val outputStream: OutputStream = FileOutputStream(file)
@@ -318,8 +318,9 @@ class AccessibilityDeveloperService : AccessibilityService() {
         serializer.setOutput(stringWriter)
         serializer.startDocument("UTF-8", true)
         serializer.startTag("", "hierarchy")
-        dumpNodeRec(node, serializer, 0)
-        serializer.endTag("", "hierarchy");
+        dumpNodeRec(rootInActiveWindow, serializer, 0)
+        log("WOW", rootInActiveWindow.childCount.toString() + " " + rootInActiveWindow.className)
+        serializer.endTag("", "hierarchy")
         serializer.endDocument();
         writer.write(stringWriter.toString());
         writer.close();
@@ -329,11 +330,82 @@ class AccessibilityDeveloperService : AccessibilityService() {
         log(LOG_TAG, "Fetch time: " + (endTime - startTime) + "ms")
     }
 
+    /**
+     * The list of classes to exclude my not be complete. We're attempting to
+     * only reduce noise from standard layout classes that may be falsely
+     * configured to accept clicks and are also enabled.
+     *
+     * @param node
+     * @return true if node is excluded.
+     */
+    private fun nafExcludedClass(node: AccessibilityNodeInfo): Boolean {
+        val className = safeCharSeqToString(node.className)
+        val NAF_EXCLUDED_CLASSES = arrayOf(
+            GridView::class.java.name, GridLayout::class.java.name,
+            ListView::class.java.name, TableLayout::class.java.name
+        )
+        for (excludedClassName in NAF_EXCLUDED_CLASSES) {
+            if (className!!.endsWith(excludedClassName)) return true
+        }
+        return false
+    }
+
+    /**
+     * We're looking for UI controls that are enabled, clickable but have no
+     * text nor content-description. Such controls configuration indicate an
+     * interactive control is present in the UI and is most likely not
+     * accessibility friendly. We refer to such controls here as NAF controls
+     * (Not Accessibility Friendly)
+     *
+     * @param node
+     * @return false if a node fails the check, true if all is OK
+     */
+    private fun nafCheck(node: AccessibilityNodeInfo): Boolean {
+        val isNaf = (node.isClickable && node.isEnabled
+                && safeCharSeqToString(node.contentDescription)!!.isEmpty()
+                && safeCharSeqToString(node.text)!!.isEmpty())
+        return if (!isNaf) true else childNafCheck(node)
+        // check children since sometimes the containing element is clickable
+        // and NAF but a child's text or description is available. Will assume
+        // such layout as fine.
+    }
+
+    /**
+     * This should be used when it's already determined that the node is NAF and
+     * a further check of its children is in order. A node maybe a container
+     * such as LinerLayout and may be set to be clickable but have no text or
+     * content description but it is counting on one of its children to fulfill
+     * the requirement for being accessibility friendly by having one or more of
+     * its children fill the text or content-description. Such a combination is
+     * considered by this dumper as acceptable for accessibility.
+     *
+     * @param node
+     * @return false if node fails the check.
+     */
+    private fun childNafCheck(node: AccessibilityNodeInfo): Boolean {
+        val childCount = node.childCount
+        for (x in 0 until childCount) {
+            val childNode = node.getChild(x)
+            if (childNode == null) {
+                log(
+                    "dump a11y child naf check", String.format(
+                        "Null child %d/%d, parent: %s",
+                        x, childCount, node.toString()
+                    )
+                )
+                continue
+            }
+            if (!safeCharSeqToString(childNode.contentDescription)!!.isEmpty()
+                || !safeCharSeqToString(childNode.text)!!.isEmpty()
+            ) return true
+            if (childNafCheck(childNode)) return true
+        }
+        return false
+    }
     @Throws(IOException::class)
     private fun dumpNodeRec(node: AccessibilityNodeInfo, serializer: XmlSerializer, index: Int) {
 
         serializer.startTag("", "node")
-
         serializer.attribute("", "index", Integer.toString(index))
         serializer.attribute("", "text", safeCharSeqToString(node.text))
         serializer.attribute("", "class", safeCharSeqToString(node.className))
@@ -344,12 +416,16 @@ class AccessibilityDeveloperService : AccessibilityService() {
         serializer.attribute("", "clickable", java.lang.Boolean.toString(node.isClickable))
         serializer.attribute("", "enabled", java.lang.Boolean.toString(node.isEnabled))
         serializer.attribute("", "focusable", java.lang.Boolean.toString(node.isFocusable))
+        serializer.attribute("", "importantForAccessibility", java.lang.Boolean.toString(node.isImportantForAccessibility))
         serializer.attribute("", "focused", java.lang.Boolean.toString(node.isFocused))
         serializer.attribute("", "scrollable", java.lang.Boolean.toString(node.isScrollable))
         serializer.attribute("", "long-clickable", java.lang.Boolean.toString(node.isLongClickable))
         serializer.attribute("", "password", java.lang.Boolean.toString(node.isPassword))
         serializer.attribute("", "selected", java.lang.Boolean.toString(node.isSelected))
         serializer.attribute("", "visible", java.lang.Boolean.toString(node.isVisibleToUser))
+        serializer.attribute("", "invalid", java.lang.Boolean.toString(node.isContentInvalid))
+        if (!nafExcludedClass(node) && !nafCheck(node))
+            serializer.attribute("", "NAF", java.lang.Boolean.toString(true));
         val bounds = Rect()
         node.getBoundsInScreen(bounds)
         serializer.attribute("", "bounds", bounds.toShortString())
@@ -469,7 +545,6 @@ class AccessibilityDeveloperService : AccessibilityService() {
     }
 
     //https://developer.android.com/guide/topics/ui/accessibility/service#continued-gestures
-    //TODO: BUG [01] Menu not appearing
     fun swipeUpRight(broadcastId: String) {
         val stX = halfWidth - quarterWidth
         val enX = halfWidth + quarterWidth
@@ -477,12 +552,9 @@ class AccessibilityDeveloperService : AccessibilityService() {
         val stY = halfHeight + quarterHeight
         val enY = halfHeight - quarterHeight
 
-        val swipeUp = Path().apply {
+        val swipeUpRight = Path().apply {
             moveTo(stX, stY)
             lineTo(stX, enY)
-        }
-        val swipeLeftToRight = Path().apply {
-            moveTo(stX, enY)
             lineTo(enX, enY)
         }
 
@@ -490,16 +562,33 @@ class AccessibilityDeveloperService : AccessibilityService() {
         log("path_v", "mv x: [$stX], y: [$enY]")
         log("path_v", "dl x: [${stX - stX}], y: [${enY - stY}]")
 
-        log("path_h", "to x: [$stX], y: [$enY]")
-        log("path_h", "mv x: [$enX], y: [$enY]")
         log("path_h", "dl x: [${enX - stX}], y: [${enY - enY}]")
 
         performGesture(
-            GestureAction(swipeUp),
-            GestureAction(swipeLeftToRight, 500),
+            GestureAction(swipeUpRight),
             broadcastId = broadcastId
         )
     }
+
+    fun swipeUpLeft(broadcastId: String) {
+        val enX = halfWidth - quarterWidth
+        val stX = halfWidth + quarterWidth
+
+        val stY = halfHeight + quarterHeight
+        val enY = halfHeight - quarterHeight
+
+        val swipeUpLeft = Path().apply {
+            moveTo(stX, stY)
+            lineTo(stX, enY)
+            lineTo(enX, enY)
+        }
+
+        performGesture(
+            GestureAction(swipeUpLeft),
+            broadcastId = broadcastId
+        )
+    }
+
 
     // https://developer.android.com/guide/topics/ui/accessibility/service#continued-gestures
     // Taken from online documentation. Seems to have left out the dispatch of the gesture.
@@ -547,12 +636,17 @@ class AccessibilityDeveloperService : AccessibilityService() {
         private var gBroadcastId = broadcastId
         private var gPreFocus = preFocus
         override fun onCompleted(gestureDescription: GestureDescription?) {
-            //  swiped and focus changed 200 and swiped but focus remain unchanged 204
+            //  swiped and focus changed return code=200; swiped but focus remain unchanged return code=204
+            sleep(100) // WEIRDLY sometimes the focused node is not updated in this method
 
             var code: Int
             var node = instance?.findFocus(FOCUS_ACCESSIBILITY)
+
             code = if (node == null)
-                204
+                206
+            else if(instance == null){
+                208
+            }
             else {
                 var focus_bounds = Rect()
                 node.getBoundsInScreen(focus_bounds)

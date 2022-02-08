@@ -42,6 +42,9 @@ class AccessibilityActionReceiver : BroadcastReceiver() {
         const val PARAMETER_TYPE = "PARAMETER_TYPE"
 
         const val ACTION_DUMP_A11Y_TREE = "ACTION_DUMP_A11Y_TREE"
+        const val ACTION_LOG_TB_TREE = "ACTION_LOG_TB_TREE"
+
+        const val ACTION_MENU = "ACTION_MENU"
     }
 
     private fun showError(context: Context, message: String) {
@@ -62,7 +65,9 @@ class AccessibilityActionReceiver : BroadcastReceiver() {
             serviceReference.apply {
                 when (it) {
                     ACTION_DEBUG -> debugAction()
-                    ACTION_DUMP_A11Y_TREE -> dumpA11yTree(broadcastID = broadcastID)
+                    ACTION_MENU -> swipeUpRight(broadcastID)
+                    ACTION_LOG_TB_TREE -> swipeUpLeft(broadcastID)
+                    ACTION_DUMP_A11Y_TREE -> dumpA11yTree(broadcastID)
                     ACTION_SWIPE_LEFT -> swipeHorizontal(true, broadcastID)
                     ACTION_SWIPE_RIGHT -> swipeHorizontal(false, broadcastID)
                     ACTION_SWIPE_UP -> swipeVertical(true, broadcastID)

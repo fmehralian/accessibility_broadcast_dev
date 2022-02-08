@@ -3,7 +3,7 @@ package com.balsdon.accessibilityDeveloperService
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
 
-data class GestureAction(val path: Path, val startTime: Long = 0, val duration: Long = 300)
+data class GestureAction(val path: Path, val startTime: Long = 0, val duration: Long = 400)
 
 fun createGestureFrom(vararg gestureActions: GestureAction): GestureDescription {
     require(gestureActions.isNotEmpty()) { "Must perform at least 1 action" }
