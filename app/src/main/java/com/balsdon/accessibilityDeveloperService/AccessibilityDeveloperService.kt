@@ -319,7 +319,6 @@ class AccessibilityDeveloperService : AccessibilityService() {
         serializer.startDocument("UTF-8", true)
         serializer.startTag("", "hierarchy")
         dumpNodeRec(rootInActiveWindow, serializer, 0)
-        log("WOW", rootInActiveWindow.childCount.toString() + " " + rootInActiveWindow.className)
         serializer.endTag("", "hierarchy")
         serializer.endDocument();
         writer.write(stringWriter.toString());
@@ -405,6 +404,7 @@ class AccessibilityDeveloperService : AccessibilityService() {
     @Throws(IOException::class)
     private fun dumpNodeRec(node: AccessibilityNodeInfo, serializer: XmlSerializer, index: Int) {
 
+
         serializer.startTag("", "node")
         serializer.attribute("", "index", Integer.toString(index))
         serializer.attribute("", "text", safeCharSeqToString(node.text))
@@ -424,8 +424,13 @@ class AccessibilityDeveloperService : AccessibilityService() {
         serializer.attribute("", "selected", java.lang.Boolean.toString(node.isSelected))
         serializer.attribute("", "visible", java.lang.Boolean.toString(node.isVisibleToUser))
         serializer.attribute("", "invalid", java.lang.Boolean.toString(node.isContentInvalid))
+        serializer.attribute("", "drawingOrder", Integer.toString(node.drawingOrder))
+        val sb = StringBuilder()
+        node.actionList.forEach { sb.append(it.id).append("-")}
+        val string = sb.removeSuffix("-").toString()
+        serializer.attribute("", "actionList", string)
         if (!nafExcludedClass(node) && !nafCheck(node))
-            serializer.attribute("", "NAF", java.lang.Boolean.toString(true));
+            serializer.attribute("", "NAF", java.lang.Boolean.toString(true))
         val bounds = Rect()
         node.getBoundsInScreen(bounds)
         serializer.attribute("", "bounds", bounds.toShortString())
@@ -433,7 +438,6 @@ class AccessibilityDeveloperService : AccessibilityService() {
         for (i in 0 until count) {
             val child = node.getChild(i)
             if (child != null) {
-
                 dumpNodeRec(child, serializer, i)
                 child.recycle()
             } else {
