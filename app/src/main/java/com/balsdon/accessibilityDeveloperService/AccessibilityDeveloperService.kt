@@ -277,8 +277,9 @@ class AccessibilityDeveloperService : AccessibilityService() {
         }
     }
 
-    fun click(long: Boolean = false) {
-        findFocusedViewInfo().performAction(if (long) ACTION_LONG_CLICK else ACTION_CLICK)
+    fun click(long: Boolean = false, broadcastId: String) {
+        val res = findFocusedViewInfo().performAction(if (long) ACTION_LONG_CLICK else ACTION_CLICK)
+        log("click","clicking res fro " + broadcastId + ": " + res)
     }
 
     fun commonDocumentDirPath(FolderName: String): File? {
@@ -309,7 +310,7 @@ class AccessibilityDeveloperService : AccessibilityService() {
         var LOG_TAG = "DumpResultCallback"
         log(LOG_TAG, "start to dump")
         val startTime = SystemClock.uptimeMillis()
-        val file = File(AccessibilityDeveloperService.instance?.baseContext?.filesDir?.path, "a11y3_$broadcastID.xml")
+        val file = File(AccessibilityDeveloperService.instance?.baseContext?.filesDir?.path, "a11y3-$broadcastID.xml")
 
         val outputStream: OutputStream = FileOutputStream(file)
         val writer = OutputStreamWriter(outputStream)

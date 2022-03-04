@@ -72,8 +72,8 @@ class AccessibilityActionReceiver : BroadcastReceiver() {
                     ACTION_SWIPE_RIGHT -> swipeHorizontal(false, broadcastID)
                     ACTION_SWIPE_UP -> swipeVertical(true, broadcastID)
                     ACTION_SWIPE_DOWN -> swipeVertical(false, broadcastID)
-                    ACTION_CLICK -> click()
-                    ACTION_LONG_CLICK -> click(true)
+                    ACTION_CLICK -> click(broadcastId = broadcastID)
+                    ACTION_LONG_CLICK -> click(true, broadcastId = broadcastID)
                     ACTION_CURTAIN -> toggleCurtain()
                     ACTION_SAY -> {
                         if (intent.hasExtra(PARAMETER_TEXT)) {
