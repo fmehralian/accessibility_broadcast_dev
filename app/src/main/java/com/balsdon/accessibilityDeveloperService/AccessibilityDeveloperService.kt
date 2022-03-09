@@ -278,6 +278,7 @@ class AccessibilityDeveloperService : AccessibilityService() {
     }
 
     fun click(long: Boolean = false, broadcastId: String) {
+        log("click", "start to click")
         val res = findFocusedViewInfo().performAction(if (long) ACTION_LONG_CLICK else ACTION_CLICK)
         log("click","clicking res fro " + broadcastId + ": " + res)
     }
@@ -408,6 +409,7 @@ class AccessibilityDeveloperService : AccessibilityService() {
 
         serializer.startTag("", "node")
         serializer.attribute("", "index", Integer.toString(index))
+        serializer.attribute("", "resource-id", safeCharSeqToString(node.viewIdResourceName))
         serializer.attribute("", "text", safeCharSeqToString(node.text))
         serializer.attribute("", "class", safeCharSeqToString(node.className))
         serializer.attribute("", "package", safeCharSeqToString(node.packageName))
