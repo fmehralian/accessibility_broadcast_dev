@@ -1,12 +1,12 @@
-package com.balsdon.accessibilityDeveloperService
+package com.balsdon.accessibilityBroadcastService
 
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.provider.Settings
+import com.balsdon.accessibilityDeveloperService.AccessibilityDeveloperService
 import com.balsdon.accessibilityDeveloperService.AccessibilityDeveloperService.Companion.DIRECTION_BACK
 import com.balsdon.accessibilityDeveloperService.AccessibilityDeveloperService.Companion.DIRECTION_FORWARD
-import java.io.File
-import java.io.FileWriter
 
 class AccessibilityActionReceiver : BroadcastReceiver() {
     companion object {
@@ -15,9 +15,10 @@ class AccessibilityActionReceiver : BroadcastReceiver() {
 
         const val ACTION_SWIPE_LEFT = "ACTION_SWIPE_LEFT"
         const val ACTION_SWIPE_RIGHT = "ACTION_SWIPE_RIGHT"
-
         const val ACTION_SWIPE_UP = "ACTION_SWIPE_UP"
         const val ACTION_SWIPE_DOWN = "ACTION_SWIPE_DOWN"
+        const val ACTION_SWIPE_UP_RIGHT = "ACTION_SWIPE_UP_RIGHT"
+
         const val ACTION_CLICK = "ACTION_CLICK"
         const val ACTION_LONG_CLICK = "ACTION_LONG_CLICK"
         const val ACTION_CURTAIN = "ACTION_CURTAIN"
@@ -30,7 +31,6 @@ class AccessibilityActionReceiver : BroadcastReceiver() {
         const val ACTION_VOLUME_MUTE = "ACTION_VOLUME_MUTE"
 
         const val ACTION_WHICH = "ACTION_WHICH"
-        const val ACTION_DEBUG = "ACTION_DEBUG"
 
         const val ACTION_SAY = "ACTION_SAY"
 
@@ -55,16 +55,30 @@ class AccessibilityActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
         require(context != null) { "Context is required" }
         require(intent != null) { "Intent is required" }
-        require(AccessibilityDeveloperService.instance != null) { "Service is required" }
-        val serviceReference = AccessibilityDeveloperService.instance!!
         val broadcastID = intent.getStringExtra(BROADCAST_ID)
         log("AccessibilityActionReceiver", " ~~> broadcastID: [$broadcastID]")
         require(broadcastID != null) { "Broadcast ID is required"}
+
+        if (TALKBACK_PACKAGE_NAMES.intersect(
+                Settings
+                    .Secure
+                    .getString(
+                        context.contentResolver,
+                        Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+                    ).split(":").toSet()
+            ).isEmpty()
+        ) {
+            log("AccessibilityActionReceiver", "TalkBack needs to be running.")
+            return
+        }
+        val accessibilityDeveloperServiceReference = AccessibilityDeveloperService.instance.get()
+        require(accessibilityDeveloperServiceReference != null) { "Service is required" }
+        val serviceReference: AccessibilityDeveloperService = accessibilityDeveloperServiceReference
+
         intent.getStringExtra(ACCESSIBILITY_ACTION)?.let {
             log("AccessibilityActionReceiver", "  ~~> ACTION: [$it]")
             serviceReference.apply {
                 when (it) {
-                    ACTION_DEBUG -> debugAction()
                     ACTION_MENU -> swipeUpRight(broadcastID)
                     ACTION_LOG_TB_TREE -> swipeUpLeft(broadcastID)
                     ACTION_DUMP_A11Y_TREE -> dumpA11yTree(broadcastID)
@@ -74,6 +88,7 @@ class AccessibilityActionReceiver : BroadcastReceiver() {
                     ACTION_SWIPE_DOWN -> swipeVertical(false, broadcastID)
                     ACTION_CLICK -> click(broadcastId = broadcastID)
                     ACTION_LONG_CLICK -> click(true, broadcastId = broadcastID)
+
                     ACTION_CURTAIN -> toggleCurtain()
                     ACTION_SAY -> {
                         if (intent.hasExtra(PARAMETER_TEXT)) {
@@ -90,7 +105,6 @@ class AccessibilityActionReceiver : BroadcastReceiver() {
                             }
                         }
                     }
-
                     ACTION_FOCUS_ELEMENT -> {
                         if (intent.hasExtra(PARAMETER_ID)) {
                             val value = intent.getStringExtra(PARAMETER_ID)
@@ -117,7 +131,7 @@ class AccessibilityActionReceiver : BroadcastReceiver() {
                         } else if (intent.hasExtra(PARAMETER_TYPE)) {
                             if (intent.hasExtra(PARAMETER_DIRECTION)) {
                                 val dir = (intent.getStringExtra(PARAMETER_DIRECTION)
-                                    ?: DIRECTION_FORWARD).toUpperCase() == DIRECTION_FORWARD
+                                    ?: DIRECTION_FORWARD).uppercase() == DIRECTION_FORWARD
                                 log(
                                     "AccessibilityActionReceiver",
                                     "    ~~> TYPE: [$PARAMETER_TYPE]: $dir"
@@ -140,7 +154,7 @@ class AccessibilityActionReceiver : BroadcastReceiver() {
                             }
                         } else if (intent.hasExtra(PARAMETER_HEADING)) {
                             val dir = (intent.getStringExtra(PARAMETER_HEADING)
-                                ?: DIRECTION_FORWARD).toUpperCase() == DIRECTION_FORWARD
+                                ?: DIRECTION_FORWARD).uppercase() == DIRECTION_FORWARD
                             log(
                                 "AccessibilityActionReceiver",
                                 "    ~~> TYPE: [$PARAMETER_HEADING]: DIRECTION: $dir"
@@ -164,9 +178,7 @@ class AccessibilityActionReceiver : BroadcastReceiver() {
                     ACTION_VOLUME_MUTE -> setVolume(0)
                     ACTION_WHICH -> findFocusedViewInfo()
 
-                    else -> with("ERROR: Unknown action") {
-                        showError(context, it)
-                    }
+                    else -> showError(context, it)
                 }
             }
         } ?: serviceReference.swipeHorizontal(true, broadcastID)

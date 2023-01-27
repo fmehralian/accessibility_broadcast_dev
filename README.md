@@ -70,15 +70,12 @@ adb shell am broadcast -a com.balsdon.talkback.accessibility -e
     ACTION "ACTION_SAY"
         -e PARAMETER_TEXT "some\ text\ escape\ the\ spaces"
 
-//TODO: [BUG 01]
 adb shell am broadcast -a com.balsdon.talkback.accessibility -e ACTION "ACTION_MENU"
 ```
 
-adb shell am broadcast -a com.google.android.accessibility.talkback.controller.GestureActionPerformedAction -e com.google.android.accessibility.talkback.controller.ShortcutGestureExtraAction
-
 The first two are the same, they fire an intent that will tell the screen reader to focus on the next available element. Sending `-e ACTION "[PARAMETER]"`
   - `ACTION_PREV` will inform the service to focus on the previous element
-  - `ACTION_MENU` will open the accessibility menu so users can focus on headings, paragraphs, etc. This is currently not working
+  - `ACTION_MENU` will open the accessibility menu so users can focus on headings, paragraphs, etc.
   - `ACTION_HEADING_[NEXT | PREV]` focuses on the next / previous heading element
   - `ACTION_VOLUME_[UP | DOWN]` allows developers to incrementally the accessibility volume
   - `ACTION_VOLUME_SET` allows developers to directly set the accessibility volume.
@@ -97,23 +94,42 @@ The first two are the same, they fire an intent that will tell the screen reader
  - [Accessibility scanner][7]
  - [Google I/O on Accessibility][8]
  - [Android Accessibility — Resolving common Talkback issues][9]
+ - [Google Accessibility API][17]
 
 ## TODO
 
  - Resolve the disconnect between Gesture and Action
      - Currently the service takes actions for users, but if they are not my expected defaults they may behave differently. For example: Swiping from higher to lower on the screen on some devices might highlight the next heading, while other devices may adjust selection granularity type (i.e. enable you to use NEXT and PREV to navigate headings, paragraphs, links, characters).
-        - :white_check_mark: Option 1: Convert actions to gestures (easy, but makes me sad. Also, more complex gestures don't work)
+        - :white_check_mark: Option 1: Convert actions to gestures (easy, but makes me sad. ~Also, more complex gestures don't work~)
         - :x: Option 2: Find a method of doing actions that doesn't involve gestures. Currently looking at [AccessibilityNodeInfo.performAction][13]
            - I can navigate the tree myself, but I have no way of knowing if I am consistent with TalkBack
+ - Need to create a settings activity. See [Accessibility service configuration][16]
+ - Sort out code structure
+ - Toggle Talkback toast captions?
+ - Allow triple tap (interact with links)
  - :white_check_mark: [FEATURE] Add a "perform click" action
- - :white_check_mark: Add a "focus by id" action - might aid my scripts
- - :white_check_mark: Add a "focus by id" action - might aid my scripts
+ - :white_check_mark: Add a "focus by id" action - might aid [talos][4] scripts
  - [FEATURE] Create a map of the current screen
+     - Show a list of headings
+     - Filter by control type
+     - Show all "Announcement data" (text / content-description) 
  - [FEATURE] Enable developers to show / hide more of the curtain elements
- - :bug: [BUG] 01 Open the accessibility menu. Currently the code is there but something is not happening. [Opened an issue][14]
- - :bug: [BUG] 02 Scroll down to selected element. Currently an accessibility service can only scroll on scrollable nodes.
-  -:bug: [BUG] 03 Do not store an instance in a companion object. It feels wrong, I have not found a better solution yet
-
+ - [FEATURE] Show TalkBack version
+ - [FEATURE] Change OS Language (low priority)
+ - !FIXED! :bug: [BUG] 01 Open the accessibility menu. Currently the code is there but something is not happening. [Opened an issue][14]
+ - :bug: [BUG] 02 Scroll down to selected element. Currently an accessibility service can only scroll on scrollable nodes. 
+ - !FIXED! :bug: [BUG] 03 Do not store an instance in a companion object. It feels wrong, I have not found a better solution yet
+ - !FIXED! :bug: [BUG] 04 With new version the distances used for programmatic gestures need to be larger.
+ - !FIXED! :bug: [BUG] [05] When the curtain is drawn the data is blank
+ - [FEATURE] See what is readable from the API's of Talkback
+   - [Get the gesture mappings][18]
+   - Get the node structure: next, previous
+   - Read the current granularity
+ - [FEATURE] Improvements to the curtain
+   - Initial loading is empty
+   - "Hole" / "Pigeon" mode - only show certain elements (Headings, links, labels, etc)
+ - :white_check_mark: [FEATURE] Improve the look of the test activity. It's hideous and inaccessible
+   - Add UI tests to the main screen
 
 [1]: https://stackoverflow.com/questions/37460463/how-to-send-key-down-and-key-up-events-separately-on-android-using-adb
 [2]: https://developer.android.com/guide/topics/ui/accessibility/service
@@ -130,3 +146,6 @@ The first two are the same, they fire an intent that will tell the screen reader
 [13]: https://developer.android.com/reference/android/view/accessibility/AccessibilityNodeInfo#performAction(int,%20android.os.Bundle)
 [14]: https://issuetracker.google.com/u/2/issues/185631661
 [15]: https://github.com/qbalsdon/accessibility_broadcast_dev#scripting
+[16]: https://developer.android.com/guide/topics/ui/accessibility/service#service-config
+[17]: https://developer.android.com/reference/android/view/accessibility/package-summary.html
+[18]: https://github.com/google/talkback/blob/6c0b475b7f52469e309e51bfcc13de58f18176ff/utils/src/main/java/com/google/android/accessibility/utils/AccessibilityServiceCompatUtils.java#L143
