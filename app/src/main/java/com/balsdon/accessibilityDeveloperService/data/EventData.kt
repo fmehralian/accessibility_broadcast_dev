@@ -18,9 +18,9 @@ data class EventData(
             var previousEventNodeIsEditable = false
             try {
                 with(a11yEvent.source) {
-                    previousEventNodeIsHeading = this.isHeading
-                    previousEventNodeIsEditable = this.isEditable
-                    recycle()
+                    previousEventNodeIsHeading = this?.isHeading ?: false
+                    previousEventNodeIsEditable = this?.isEditable ?: false
+                    this?.recycle()
                 }
             } catch (exception: NullPointerException) {
                 exception.printStackTrace()
@@ -28,7 +28,7 @@ data class EventData(
 
             return EventData().copy(
                 eventText = a11yEvent.text.toString(),
-                className = a11yEvent.className.toString(),
+                className = if (a11yEvent.className != null) a11yEvent.className.toString() else "",
                 isPassword = a11yEvent.isPassword,
                 isEnabled = a11yEvent.isEnabled,
                 isChecked = a11yEvent.isChecked,

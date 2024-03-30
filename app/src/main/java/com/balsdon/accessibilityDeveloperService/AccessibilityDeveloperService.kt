@@ -5,6 +5,7 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.content.Context
 import android.content.IntentFilter
+import android.graphics.Bitmap
 import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.Rect
@@ -12,18 +13,16 @@ import android.media.AudioManager
 import android.os.Build
 import android.os.Environment
 import android.os.SystemClock
+import android.support.wearable.watchface.accessibility.AccessibilityUtils
 import android.util.Xml
-import android.view.Gravity
-import android.view.LayoutInflater
-import android.view.View
-import android.view.WindowManager
+import android.view.*
 import android.view.accessibility.AccessibilityEvent
-import android.view.accessibility.AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
 import android.view.accessibility.AccessibilityManager
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityNodeInfo.*
 import android.widget.*
 import androidx.annotation.IdRes
+import androidx.annotation.RequiresApi
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat
 import com.balsdon.accessibilityBroadcastService.ACCESSIBILITY_CONTROL_BROADCAST_ACTION
 import com.balsdon.accessibilityBroadcastService.AccessibilityActionReceiver
@@ -31,8 +30,11 @@ import com.balsdon.accessibilityBroadcastService.log
 import com.balsdon.accessibilityDeveloperService.data.EventData
 import org.xmlpull.v1.XmlSerializer
 import java.io.*
-import java.lang.Thread.sleep
+import java.lang.Math.max
 import java.lang.ref.WeakReference
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.thread
+import kotlin.concurrent.withLock
 
 
 /*
@@ -50,6 +52,17 @@ class AccessibilityDeveloperService : AccessibilityService() {
         const val DIRECTION_BACK = "DIRECTION_BACK"
         private const val MAX_POSITION = 1000f
         private const val MIN_POSITION = 100f
+        private const val IDLE_TIMEOUT = 10000
+        private const val TRANSITION_TIMEOUT = 3000
+        private const val IDLE_TIME = 1000
+
+
+        // lock to prevent concurrent access to the a11yList
+        val lock = ReentrantLock()
+        val condition = lock.newCondition()
+        var a11yList = ArrayList<AccessibilityEvent>()
+        var waitingForEvent = false
+        var mLastEventTimeMillis: Long = -1
 
         private val accessibilityButtonCallback =
             object : AccessibilityButtonController.AccessibilityButtonCallback() {
@@ -58,8 +71,6 @@ class AccessibilityDeveloperService : AccessibilityService() {
                         "AccessibilityDeveloperService",
                         "    ~~> AccessibilityButtonCallback"
                     )
-                    // Add custom logic for a service to react to the
-                    // accessibility button being pressed.
                 }
 
                 override fun onAvailabilityChanged(
@@ -110,14 +121,23 @@ class AccessibilityDeveloperService : AccessibilityService() {
     override fun onInterrupt() = Unit
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event == null) return
+        if (event == null)
+        {
+            log("AccessibilityEvents", "NULL")
+            return
+        }
 
-        log("AccessibilityDeveloperService", "  ~~> onAccessibilityEvent [$event]")
+        log("AccessibilityEvents", "[$event]; view: [${event.source}]")
 
-        if (event.eventType == TYPE_WINDOW_STATE_CHANGED) return
+        lock.withLock {
+            mLastEventTimeMillis = max(mLastEventTimeMillis, event.getEventTime())
+            if (waitingForEvent) {
+                a11yList.add(event)
+            }
+            condition.signalAll()
+        }
 
         if (!event.text.isNullOrEmpty()) {
-            log("AccessibilityDeveloperService", "  ~~> Announce [$event]")
             previousEvent = EventData.from(event)
             showEvent(previousEvent)
         }
@@ -258,10 +278,194 @@ class AccessibilityDeveloperService : AccessibilityService() {
         }
     }
 
+    @RequiresApi(Build.VERSION_CODES.R)
+    fun swipeHorizontalWaitCapture(rightToLeft: Boolean, broadcastId: String) {
+        thread {
+            log("swipeHorizontalWaitCapture", "start to swipeHorizontalWaitCapture")
+            lock.withLock {
+                waitingForEvent = true
+                a11yList.clear()
+            }
+            performGesture(
+                GestureAction(createHorizontalSwipePath(rightToLeft)),
+                broadcastId = broadcastId
+            )
+
+            var receivedEvents = ArrayList<String>()
+            try {
+                var startTime = SystemClock.uptimeMillis()
+                while (true) {
+                    var localEvents = ArrayList<AccessibilityEvent>()
+                    lock.withLock {
+                        localEvents.addAll(a11yList)
+                        if (a11yList.size > 0) {
+                            a11yList.clear()
+                        }
+                    }
+                    while (!localEvents.isEmpty()) {
+                        var e = localEvents.removeAt(0)
+                        receivedEvents.add(e.eventType.toString())
+                        if (e.eventTime < startTime) {
+                            continue
+                        }
+                        if (e.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED ||
+                            e.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+                            e.eventType == AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED
+                        ) {
+                            throw Exception("window transition observed ")
+                        }
+                    }
+                    var pastTime = SystemClock.uptimeMillis() - startTime
+                    if (pastTime > TRANSITION_TIMEOUT) {
+                        throw Exception("Event not received, we are in timeout " + pastTime.toString())
+                    }
+                }
+            } catch (e: Exception) {
+                log("swipeHorizontalWaitCapture", "swipeHorizontalWaitCapture exception for " + broadcastId + ": " + e)
+                dumpA11yTree(broadcastId)
+                takeScreenshot(broadcastId)
+            } finally {
+                lock.withLock {
+                    waitingForEvent = false
+                    condition.signalAll()
+                    a11yList.clear()
+                }
+            }
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.R)
+    fun captureWhenIdle(broadcastId: String) {
+        thread {
+            log("captureWhenIdle", "start to captureWhenIdle")
+
+            try {
+                var startTime = SystemClock.uptimeMillis()
+                lock.withLock {
+                    if (mLastEventTimeMillis <= 0) {
+                        mLastEventTimeMillis = startTime
+                    }
+                }
+                while (true) {
+                    var curTime = SystemClock.uptimeMillis()
+                    if (curTime - startTime > IDLE_TIMEOUT) {
+                        throw Exception("IDLE timeout " + (curTime - startTime).toString())
+                    }
+                    if (curTime - mLastEventTimeMillis > IDLE_TIME) {
+                        throw Exception("IDLE observed $curTime, $mLastEventTimeMillis " + (curTime - mLastEventTimeMillis).toString())
+                    }
+
+                }
+            } catch (e: Exception) {
+                log("captureWhenIdle", "captureWhenIdle exception for " + broadcastId + ": " + e)
+                takeScreenshot(broadcastId)
+            } finally {
+
+            }
+        }
+    }
+    @RequiresApi(Build.VERSION_CODES.R)
+    fun clickWaitCapture(broadcastId: String) {
+        thread {
+            log("clickWaitCapture", "start to clickWaitCapture")
+            lock.withLock {
+                waitingForEvent = true
+                a11yList.clear()
+            }
+
+            val res = findFocusedViewInfo().performAction(ACTION_CLICK)
+            log("clickWaitCapture", "clickWaitCapture res for " + broadcastId + ": " + res)
+            var receivedEvents = ArrayList<String>()
+            try {
+                var startTime = SystemClock.uptimeMillis()//System.currentTimeMillis()
+                log("TTT:AccessibilityEvents", startTime.toString())
+                while (true) {
+                    var localEvents = ArrayList<AccessibilityEvent>()
+                    lock.withLock {
+                        localEvents.addAll(a11yList)
+                        if (a11yList.size > 0) {
+                            a11yList.clear()
+                        }
+                    }
+                    while (!localEvents.isEmpty()) {
+                        var e = localEvents.removeAt(0)
+                        if (e.eventTime < startTime) {
+                            continue
+                        }
+                        if (e.eventType == AccessibilityEvent.TYPE_WINDOWS_CHANGED ||
+                            e.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+                            e.eventType == AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED
+                        ) {
+                            throw Exception("window transition observed " )
+                        }
+                    }
+                    var pastTime = SystemClock.uptimeMillis() - startTime
+                    if (pastTime > TRANSITION_TIMEOUT) {
+                        throw Exception("Event not received, we are in timeout " + pastTime.toString())
+                    }
+
+                }
+            } catch (e: Exception) {
+                log("clickWaitCapture", "clickWaitCapture exception: " + e.toString())
+
+                dumpA11yTree(broadcastId)
+                takeScreenshot(broadcastId)
+            } finally {
+
+                lock.withLock {
+                    waitingForEvent = false
+                    condition.signalAll()
+                    a11yList.clear()
+                }
+            }
+
+        }
+    }
+    @RequiresApi(Build.VERSION_CODES.R)
+    private fun takeScreenshot(name:String) {
+        takeScreenshot(
+            Display.DEFAULT_DISPLAY,
+            applicationContext.mainExecutor, @RequiresApi(Build.VERSION_CODES.R)
+            object : TakeScreenshotCallback {
+                @RequiresApi(api = Build.VERSION_CODES.R)
+                override fun onSuccess(screenshotResult: ScreenshotResult) {
+                    log("ScreenShotResult", "onSuccess")
+                    val bitmap = Bitmap.wrapHardwareBuffer(
+                        screenshotResult.hardwareBuffer,
+                        screenshotResult.colorSpace
+                    )
+                    if (bitmap != null) {
+                        saveImage(bitmap, "$name.png")
+                    }
+                }
+
+                override fun onFailure(i: Int) {
+                    log("ScreenShotResult", "onFailure code is $i")
+                }
+            })
+    }
+
+    private fun saveImage(finalBitmap: Bitmap, name:String) {
+        val file = File(baseContext.filesDir.path, name)
+        if (file.exists()) file.delete()
+        try {
+            val out = FileOutputStream(file)
+            finalBitmap.compress(Bitmap.CompressFormat.PNG, 90, out)
+            log("Screenshot", "dumped to " + file.absolutePath)
+            out.flush()
+            out.close()
+        } catch (e: java.lang.Exception) {
+            e.printStackTrace()
+        }
+    }
+
     fun click(long: Boolean = false, broadcastId: String) {
-        log("click", "start to click")
-        val res = findFocusedViewInfo().performAction(if (long) ACTION_LONG_CLICK else ACTION_CLICK)
-        log("click","clicking res fro " + broadcastId + ": " + res)
+        thread {
+            log("click", "start to click")
+            val res =
+                findFocusedViewInfo().performAction(if (long) ACTION_LONG_CLICK else ACTION_CLICK)
+            log("click", "clicking res for " + broadcastId + ": " + res)
+        }
     }
 
     fun commonDocumentDirPath(FolderName: String): File? {
@@ -403,13 +607,16 @@ class AccessibilityDeveloperService : AccessibilityService() {
         serializer.attribute("", "focusable", java.lang.Boolean.toString(node.isFocusable))
         serializer.attribute("", "importantForAccessibility", java.lang.Boolean.toString(node.isImportantForAccessibility))
         serializer.attribute("", "focused", java.lang.Boolean.toString(node.isFocused))
+        serializer.attribute("", "a11yFocused", java.lang.Boolean.toString(node.isAccessibilityFocused))
         serializer.attribute("", "scrollable", java.lang.Boolean.toString(node.isScrollable))
         serializer.attribute("", "long-clickable", java.lang.Boolean.toString(node.isLongClickable))
         serializer.attribute("", "password", java.lang.Boolean.toString(node.isPassword))
         serializer.attribute("", "selected", java.lang.Boolean.toString(node.isSelected))
         serializer.attribute("", "visible", java.lang.Boolean.toString(node.isVisibleToUser))
         serializer.attribute("", "invalid", java.lang.Boolean.toString(node.isContentInvalid))
+        serializer.attribute("", "liveRegion", Integer.toString(node.liveRegion))
         serializer.attribute("", "drawingOrder", Integer.toString(node.drawingOrder))
+//        serializer.attribute("", "hasInitFocus", java.lang.Boolean.toString(node.hasRequestInitialAccessibilityFocus()))
         val sb = StringBuilder()
         node.actionList.forEach { sb.append(it.id).append("-")}
         val string = sb.removeSuffix("-").toString()
@@ -541,35 +748,46 @@ class AccessibilityDeveloperService : AccessibilityService() {
     fun swipeUpLeft(broadcastId: String) {
 
         val swipeUpLeft = Path().apply {
-            moveTo(MAX_POSITION, MAX_POSITION)
-            lineTo(MAX_POSITION, MIN_POSITION)
+            moveTo(MAX_POSITION/2, MAX_POSITION)
+            lineTo(MAX_POSITION/2, MIN_POSITION)
             lineTo(MIN_POSITION, MIN_POSITION)
         }
 
         performGesture(
-            GestureAction(swipeUpLeft),
+            GestureAction(swipeUpLeft,0,300),
             broadcastId = broadcastId
         )
     }
 
 
-    private fun performGesture(vararg gestureActions: GestureAction, broadcastId: String) =
+    private fun performGesture(vararg gestureActions: GestureAction, broadcastId: String, capture: Boolean = false) =
         dispatchGesture(
             createGestureFrom(*gestureActions),
-            GestureResultCallback(broadcastId, this.findFocus(FOCUS_ACCESSIBILITY)),
+            GestureResultCallback(broadcastId, this.findFocus(FOCUS_ACCESSIBILITY), this, capture),
             null
         )
 
 
     class GestureResultCallback(
         broadcastId: String,
-        preFocus: AccessibilityNodeInfo
+        preFocus: AccessibilityNodeInfo,
+        ctx: AccessibilityDeveloperService,
+        capture: Boolean
     ) :
         AccessibilityService.GestureResultCallback() {
 
         private var gBroadcastId = broadcastId
         private var gPreFocus = preFocus
+        private var gCapture = capture
+        private var ctx = ctx
+        @RequiresApi(Build.VERSION_CODES.R)
         override fun onCompleted(gestureDescription: GestureDescription?) {
+            if (gCapture)
+            {
+                ctx.dumpA11yTree(gBroadcastId)
+                ctx.takeScreenshot(gBroadcastId)
+
+            }
             //  swiped and focus changed return code=200; swiped but focus remain unchanged return code=204
 //            sleep(100) // WEIRDLY sometimes the focused node is not updated in this method
 //

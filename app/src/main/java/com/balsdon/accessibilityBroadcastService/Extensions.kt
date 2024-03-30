@@ -11,7 +11,7 @@ fun Context.showToast(message: String) {
 }
 
 fun log(label: String, message: String, ack: Boolean = false) {
-    android.util.Log.d(label, "[$label]: $message")
+    android.util.Log.d(label, "$message")
     if (ack) {
         var code = message.split(" ").last()
         var fileName = "$label-$code"

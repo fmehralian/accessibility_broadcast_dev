@@ -3,7 +3,9 @@ package com.balsdon.accessibilityBroadcastService
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.provider.Settings
+import androidx.annotation.RequiresApi
 import com.balsdon.accessibilityDeveloperService.AccessibilityDeveloperService
 import com.balsdon.accessibilityDeveloperService.AccessibilityDeveloperService.Companion.DIRECTION_BACK
 import com.balsdon.accessibilityDeveloperService.AccessibilityDeveloperService.Companion.DIRECTION_FORWARD
@@ -18,8 +20,11 @@ class AccessibilityActionReceiver : BroadcastReceiver() {
         const val ACTION_SWIPE_UP = "ACTION_SWIPE_UP"
         const val ACTION_SWIPE_DOWN = "ACTION_SWIPE_DOWN"
         const val ACTION_SWIPE_UP_RIGHT = "ACTION_SWIPE_UP_RIGHT"
+        const val ACTION_SWIPE_RIGHT_WAIT_CAPTURE = "ACTION_SWIPE_RIGHT_WAIT_CAPTURE"
+        const val ACTION_IDLE_CAPTURE = "ACTION_IDLE_CAPTURE"
 
         const val ACTION_CLICK = "ACTION_CLICK"
+        const val ACTION_CLICK_WAIT_CAPTURE = "ACTION_CWC"
         const val ACTION_LONG_CLICK = "ACTION_LONG_CLICK"
         const val ACTION_CURTAIN = "ACTION_CURTAIN"
 
@@ -52,6 +57,7 @@ class AccessibilityActionReceiver : BroadcastReceiver() {
         context.showToast(message)
     }
 
+    @RequiresApi(Build.VERSION_CODES.R)
     override fun onReceive(context: Context?, intent: Intent?) {
         require(context != null) { "Context is required" }
         require(intent != null) { "Intent is required" }
@@ -84,11 +90,13 @@ class AccessibilityActionReceiver : BroadcastReceiver() {
                     ACTION_DUMP_A11Y_TREE -> dumpA11yTree(broadcastID)
                     ACTION_SWIPE_LEFT -> swipeHorizontal(true, broadcastID)
                     ACTION_SWIPE_RIGHT -> swipeHorizontal(false, broadcastID)
+                    ACTION_SWIPE_RIGHT_WAIT_CAPTURE -> swipeHorizontalWaitCapture(false, broadcastID)
                     ACTION_SWIPE_UP -> swipeVertical(true, broadcastID)
                     ACTION_SWIPE_DOWN -> swipeVertical(false, broadcastID)
                     ACTION_CLICK -> click(broadcastId = broadcastID)
+                    ACTION_CLICK_WAIT_CAPTURE -> clickWaitCapture(broadcastId = broadcastID)
                     ACTION_LONG_CLICK -> click(true, broadcastId = broadcastID)
-
+                    ACTION_IDLE_CAPTURE -> captureWhenIdle(broadcastID)
                     ACTION_CURTAIN -> toggleCurtain()
                     ACTION_SAY -> {
                         if (intent.hasExtra(PARAMETER_TEXT)) {
